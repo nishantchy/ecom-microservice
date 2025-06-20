@@ -25,7 +25,7 @@ This project is a microservices-based e-commerce order management system, inspir
                                 ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │External Product │    │     Redis       │    │    RabbitMQ     │
-│API (fakestore)  │    │   (Caching)     │    │ (Message Queue) │
+│API (fakestore)  │    │   (Rate Limit)  │    │ (Message Queue) │
 │                 │    │                 │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                                         │
