@@ -1,0 +1,82 @@
+<html>
+  <head>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f9f9f9;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        background: #fff;
+        max-width: 600px;
+        margin: 40px auto;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px #eee;
+        padding: 32px;
+      }
+      h2 {
+        color: #2d3748;
+      }
+      .order-details {
+        margin: 24px 0;
+      }
+      .order-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .order-table th,
+      .order-table td {
+        padding: 8px 12px;
+        border-bottom: 1px solid #eee;
+        text-align: left;
+      }
+      .order-table th {
+        background: #f1f1f1;
+      }
+      .total {
+        font-weight: bold;
+        color: #2b6cb0;
+      }
+      .footer {
+        margin-top: 32px;
+        color: #888;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Thank you for your order, ${userName}!</h2>
+      <p>Your order <b>#${orderNumber}</b> has been confirmed.</p>
+      <div class="order-details">
+        <table class="order-table">
+          <thead>
+            <tr>
+              <th>Product ID</th>
+              <th>Quantity</th>
+              <th>Price</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items .map( (item) => `
+            <tr>
+              <td>${item.product_id}</td>
+              <td>${item.quantity}</td>
+              <td>$${item.price}</td>
+              <td>$${item.total_amt}</td>
+            </tr>
+            ` ) .join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="total">Order Total: $${totalAmount}</p>
+      <p>Payment Method: <b>${paymentMethod}</b></p>
+      <div class="footer">
+        If you have any questions, reply to this email.<br />
+        &copy; ${new Date().getFullYear()} Nishant Ecommerce
+      </div>
+    </div>
+  </body>
+</html>
