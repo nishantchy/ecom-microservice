@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     PRODUCTS_API: str = os.getenv("PRODUCTS_API")
     AUTH_SERVICE: str = os.getenv("AUTH_SERVICE")
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL")
 
     class Config:
         env_file = ".env"

@@ -7,6 +7,8 @@ from app.utils.verify_user import verify_user_token
 from app.configs.config import settings
 import httpx
 import random
+import aio_pika
+import json
 
 router = APIRouter(
     prefix="/api/orders",
@@ -42,11 +44,26 @@ def build_shipping_address(user):
         )
     )
 
+async def publish_order_created(order_data: dict):
+    connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
+    channel = await connection.channel()
+    message = aio_pika.Message(
+        json.dumps(order_data).encode(),
+        delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+    )
+    await channel.default_exchange.publish(
+        message,
+        routing_key="order.created"
+    )
+    await connection.close()
+    print(f"[DEBUG] Published order.created event: {order_data}")
+
 @router.post("/", response_model=OrderRead, status_code=201)
 async def create_order(order: OrderCreate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     # Fetch product details and calculate totals
     items = []
     total_amount = 0
+    order_items_data = []
     async with httpx.AsyncClient() as client:
         for item in order.items:
             product_resp = await client.get(f"{settings.PRODUCTS_API}/{item.product_id}")
@@ -62,6 +79,12 @@ async def create_order(order: OrderCreate, request: Request, db: Session = Depen
             total_amt = price * item.quantity
             total_amount += total_amt
             items.append(OrderItem(product_id=item.product_id, quantity=item.quantity, total_amt=total_amt))
+            order_items_data.append({
+                "product_id": item.product_id,
+                "quantity": item.quantity,
+                "price": price,
+                "total_amt": total_amt
+            })
     # Generate order_number (example: random 6-digit)
     order_number = random.randint(100000, 999999)
     shipping_address = build_shipping_address(user)
@@ -75,6 +98,17 @@ async def create_order(order: OrderCreate, request: Request, db: Session = Depen
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+
+    # Publish event for email notification
+    await publish_order_created({
+        "order_number": db_order.order_number,
+        "user_email": user["email"],
+        "user_name": f"{user.get('first_name', '')} {user.get('last_name', '')}",
+        "total_amount": db_order.total_amount,
+        "items": order_items_data,
+        "payment_method": db_order.payment_method
+    })
+
     return db_order
 
 @router.get("/{order_id}", response_model=OrderRead)
@@ -83,3 +117,9 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
+
+
+@router.get("/", response_model=list[OrderRead])
+def get_all_orders(db: Session = Depends(get_db)):
+    orders = db.exec(select(Order)).all()
+    return orders
