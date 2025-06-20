@@ -9,6 +9,7 @@ import httpx
 import random
 import aio_pika
 import json
+from app.utils.rate_limiter import rate_limit
 
 router = APIRouter(
     prefix="/api/orders",
@@ -58,7 +59,7 @@ async def publish_order_created(order_data: dict):
     await connection.close()
     print(f"[DEBUG] Published order.created event: {order_data}")
 
-@router.post("/", response_model=OrderRead, status_code=201)
+@router.post("/", response_model=OrderRead, status_code=201, dependencies=[Depends(rate_limit(times=5, seconds=60))])
 async def create_order(order: OrderCreate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     # Fetch product details and calculate totals
     items = []

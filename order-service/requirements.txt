@@ -10,6 +10,7 @@ email_validator==2.2.0
 exceptiongroup==1.3.0
 fastapi==0.115.13
 fastapi-cli==0.0.7
+fastapi-limiter
 greenlet==3.2.3
 h11==0.16.0
 httpcore==1.0.9
@@ -34,6 +35,7 @@ Pygments==2.19.1
 python-dotenv==1.1.0
 python-multipart==0.0.20
 PyYAML==6.0.2
+redis
 rich==14.0.0
 rich-toolkit==0.14.7
 shellingham==1.5.4

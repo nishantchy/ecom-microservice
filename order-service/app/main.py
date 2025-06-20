@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from app.configs.config import settings
 from app.configs.database import create_db_and_tables
 from app.routes import order
+from app.utils.rate_limiter import init_rate_limiter
 
 
 create_db_and_tables()
@@ -16,6 +17,10 @@ app.include_router(order.router)
 @app.get("/")
 async def root():
     return "Server running at http://localhost:8001"
+
+@app.on_event("startup")
+async def startup_event():
+    await init_rate_limiter()
 
 
 # To run this service on port 8001, use:
