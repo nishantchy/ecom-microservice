@@ -43,7 +43,7 @@ This project is a microservices-based e-commerce order management system, inspir
 
 ### 1. Auth Service (FastAPI, PostgreSQL)
 
-- **Port:** 8001
+- **Port:** 8000
 - **Responsibilities:**
   - User registration, login, JWT token generation
   - Token verification for other services
