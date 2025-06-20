@@ -1,14 +1,24 @@
 # E-commerce Order Management - Microservices Architecture
 
 ## System Overview
-Building an Amazon-like order management system using external product API (fakestoreapi.in) with 4 microservices.
+
+This project is a microservices-based e-commerce order management system, inspired by Amazon's architecture. It demonstrates:
+
+- User authentication and management
+- Order creation and management
+- Email notifications for order events
+- Integration with an external product API (fakestoreapi.in)
+- Asynchronous communication using RabbitMQ
+- Caching and rate limiting with Redis
+- Polyglot persistence (PostgreSQL, MongoDB)
+- Containerization with Docker
 
 ## Architecture Diagram
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Frontend/     │    │   Auth Service  │    │  Order Service  │
-│   Mobile App    │◄──►│    (Port 8001)  │◄──►│   (Port 8003)   │
+│   Mobile App    │◄──►│    (Port 8000)  │◄──►│   (Port 8001)   │
 │                 │    │                 │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                 │                       │
@@ -27,497 +37,185 @@ Building an Amazon-like order management system using external product API (fake
                                └─────────────────┘
 ```
 
-## Service Architecture
+---
 
-### 1. Auth Service (Port 8001)
-**Responsibility:** User management and JWT token generation
+## Microservices Breakdown
 
-**Database Schema:**
-```python
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    first_name = Column(String)
-    last_name = Column(String)
-    hashed_password = Column(String)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+### 1. Auth Service (FastAPI, PostgreSQL)
 
-class Address(Base):
-    __tablename__ = "addresses"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    street = Column(String)
-    city = Column(String)
-    state = Column(String)
-    postal_code = Column(String)
-    country = Column(String)
-    is_default = Column(Boolean, default=False)
-```
+- **Port:** 8001
+- **Responsibilities:**
+  - User registration, login, JWT token generation
+  - Token verification for other services
+  - User profile and address management
+- **Key Endpoints:**
+  - `POST /register` — Register a new user
+  - `POST /login` — User login, returns JWT
+  - `POST /verify-token` — Verify JWT (used by other services)
+  - `GET /user/{user_id}` — Get user details
+- **Database:** PostgreSQL
 
-**API Endpoints:**
-- `POST /register` - User registration
-- `POST /login` - User login (returns JWT)
-- `POST /verify-token` - Token verification (used by other services)
-- `GET /user/{user_id}` - Get user details (for other services)
-- `GET /user/{user_id}/addresses` - Get user addresses
-- `POST /user/{user_id}/addresses` - Add new address
+### 2. Order Service (FastAPI, PostgreSQL, Redis, RabbitMQ)
 
-**JWT Token Structure:**
-```python
-# Token payload
-{
-    "user_id": 123,
-    "username": "john_doe",
-    "email": "john@example.com",
-    "exp": 1640995200  # expiration timestamp
-}
-```
+- **Port:** 8003
+- **Responsibilities:**
+  - Order creation and management
+  - Fetch product details from external API
+  - Rate limiting (Redis)
+  - Publishes order events to RabbitMQ
+- **Key Endpoints:**
+  - `POST /api/orders/` — Create a new order (rate-limited)
+  - `GET /api/orders/{order_id}` — Get order details
+  - `GET /api/orders/` — List all orders
+- **Database:** PostgreSQL
+- **Caching/Rate Limiting:** Redis
+- **Async Messaging:** Publishes to RabbitMQ (`order.created` queue)
 
-**Inter-service Authentication:**
-```python
-# How other services verify tokens
-async def verify_user_token(token: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://auth-service:8001/verify-token",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        if response.status_code == 200:
-            return response.json()  # Returns user data
-        return None
-```
+### 3. Email Service (Node.js, MongoDB, RabbitMQ)
 
-### 2. Order Service (Port 8003)
-**Responsibility:** Order management and payment processing
+- **Responsibilities:**
+  - Consumes `order.created` events from RabbitMQ
+  - Sends order confirmation emails using Nodemailer (Gmail)
+  - Logs sent emails to MongoDB
+- **No public HTTP endpoints required for core functionality**
+- **Database:** MongoDB (Atlas or compatible)
+- **Async Messaging:** Consumes from RabbitMQ (`order.created` queue)
 
-**Database Schema:**
-```python
-class Order(Base):
-    __tablename__ = "orders"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)  # From Auth Service
-    order_number = Column(String, unique=True)  # ORD-2024-001
-    status = Column(String, default="pending")  # pending, confirmed, shipped, delivered
-    total_amount = Column(Float)
-    payment_method = Column(String, default="cash_on_delivery")
-    shipping_address = Column(JSON)  # Store address as JSON
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-
-class OrderItem(Base):
-    __tablename__ = "order_items"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id"))
-    product_id = Column(Integer)  # From external API
-    product_name = Column(String)
-    product_price = Column(Float)
-    quantity = Column(Integer)
-    subtotal = Column(Float)
-```
-
-**API Endpoints:**
-- `POST /orders` - Create new order
-- `GET /orders/{order_id}` - Get order details
-- `GET /users/{user_id}/orders` - Get user's orders
-- `PUT /orders/{order_id}/status` - Update order status
-
-**Product Integration:**
-```python
-# Fetch product details from external API
-async def get_product_details(product_id: int):
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"https://fakestoreapi.in/api/products/{product_id}")
-        return response.json()
-
-# Redis caching for products
-async def get_cached_product(product_id: int):
-    cached = await redis_client.get(f"product:{product_id}")
-    if cached:
-        return json.loads(cached)
-    
-    # Fetch from API and cache
-    product = await get_product_details(product_id)
-    await redis_client.setex(f"product:{product_id}", 3600, json.dumps(product))
-    return product
-```
-
-### 3. Email Service (Node.js)
-**Responsibility:** Send order-related email notifications
-
-**Message Queue Consumer:**
-```javascript
-// email-service/index.js
-const amqp = require('amqplib');
-const nodemailer = require('nodemailer');
-
-const transporter = nodemailer.createTransporter({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
-
-async function consumeOrderEvents() {
-    const connection = await amqp.connect('amqp://rabbitmq:5672');
-    const channel = await connection.createChannel();
-    
-    // Order confirmation emails
-    await channel.assertQueue('order.created');
-    channel.consume('order.created', async (msg) => {
-        const orderData = JSON.parse(msg.content.toString());
-        
-        await transporter.sendMail({
-            to: orderData.user_email,
-            subject: `Order Confirmation - ${orderData.order_number}`,
-            html: generateOrderConfirmationEmail(orderData)
-        });
-        
-        channel.ack(msg);
-    });
-    
-    // Order status update emails
-    await channel.assertQueue('order.status_updated');
-    channel.consume('order.status_updated', async (msg) => {
-        const statusData = JSON.parse(msg.content.toString());
-        
-        await transporter.sendMail({
-            to: statusData.user_email,
-            subject: `Order ${statusData.status} - ${statusData.order_number}`,
-            html: generateStatusUpdateEmail(statusData)
-        });
-        
-        channel.ack(msg);
-    });
-}
-
-function generateOrderConfirmationEmail(orderData) {
-    return `
-        <h2>Order Confirmation</h2>
-        <p>Hi ${orderData.user_name},</p>
-        <p>Your order ${orderData.order_number} has been confirmed!</p>
-        
-        <h3>Order Details:</h3>
-        <ul>
-            ${orderData.items.map(item => `
-                <li>${item.product_name} x ${item.quantity} = $${item.subtotal}</li>
-            `).join('')}
-        </ul>
-        
-        <p><strong>Total: $${orderData.total_amount}</strong></p>
-        <p>Payment Method: ${orderData.payment_method}</p>
-        
-        <p>We'll notify you when your order ships!</p>
-    `;
-}
-```
+---
 
 ## Communication Patterns
 
-### 1. Synchronous Communication (HTTP)
-```python
-# Order Service → Auth Service (Get user details)
-async def get_user_details(user_id: int, token: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"http://auth-service:8001/user/{user_id}",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
+### Synchronous (HTTP)
 
-# Order Service → External Product API
-async def validate_products(product_ids: List[int]):
-    valid_products = []
-    for product_id in product_ids:
-        product = await get_cached_product(product_id)
-        if product:
-            valid_products.append(product)
-    return valid_products
+- **Order Service → Auth Service:** Verifies JWT token and fetches user info
+- **Order Service → External Product API:** Fetches product details
+
+### Asynchronous (RabbitMQ)
+
+- **Order Service → Email Service:** Publishes `order.created` event
+- **Email Service:** Consumes event, sends email, logs to MongoDB
+
+---
+
+## Environment Variables
+
+Each service uses its own `.env` file. Example variables:
+
+### Auth Service
+
+```
+DATABASE_URL=postgresql://user:pass@host:5432/auth_db
+JWT_SECRET=your_jwt_secret
+REDIS_URL=redis://host:6379
 ```
 
-### 2. Asynchronous Communication (RabbitMQ)
-```python
-# Order Service publishes events
-import aio_pika
-import json
+### Order Service
 
-async def publish_order_created(order_data: dict):
-    connection = await aio_pika.connect_robust("amqp://rabbitmq:5672/")
-    channel = await connection.channel()
-    
-    message = aio_pika.Message(
-        json.dumps(order_data).encode(),
-        delivery_mode=aio_pika.DeliveryMode.PERSISTENT
-    )
-    
-    await channel.default_exchange.publish(
-        message,
-        routing_key="order.created"
-    )
-    await connection.close()
-
-# Usage in order creation
-async def create_order(order_request, current_user):
-    # Create order in database
-    order = Order(**order_data)
-    db.add(order)
-    db.commit()
-    
-    # Publish event for email notification
-    await publish_order_created({
-        "order_number": order.order_number,
-        "user_email": current_user.email,
-        "user_name": f"{current_user.first_name} {current_user.last_name}",
-        "total_amount": order.total_amount,
-        "items": order_items_data,
-        "payment_method": order.payment_method
-    })
-    
-    return order
+```
+DATABASE_URL=postgresql://user:pass@host:5432/order_db
+PRODUCTS_API=https://fakestoreapi.in/api/products
+AUTH_SERVICE=http://auth-service:8001
+RABBITMQ_URL=amqps://user:pass@host.rmq.cloudamqp.com/vhost
+REDIS_URL=redis://host:6379
 ```
 
-## Redis Implementation
+### Email Service
 
-### Caching Strategy:
-```python
-import redis
-import json
-
-redis_client = redis.Redis(host='redis', port=6379, decode_responses=True)
-
-# Cache product details (1 hour)
-async def cache_product(product_id: int, product_data: dict):
-    await redis_client.setex(
-        f"product:{product_id}",
-        3600,
-        json.dumps(product_data)
-    )
-
-# Cache user session data (24 hours)
-async def cache_user_session(user_id: int, user_data: dict):
-    await redis_client.setex(
-        f"user_session:{user_id}",
-        86400,
-        json.dumps(user_data)
-    )
-
-# Rate limiting for order creation
-async def check_order_rate_limit(user_id: int) -> bool:
-    key = f"order_limit:{user_id}"
-    current = await redis_client.get(key)
-    
-    if current is None:
-        await redis_client.setex(key, 300, 1)  # 1 order per 5 minutes
-        return True
-    elif int(current) < 3:  # Max 3 orders per 5 minutes
-        await redis_client.incr(key)
-        return True
-    return False
 ```
+RABBITMQ_URL=amqps://user:pass@host.rmq.cloudamqp.com/vhost
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/emaildb
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_gmail_app_password
+```
+
+---
+
+## Setup & Running Locally
+
+1. **Clone the repository**
+2. **Set up environment variables** for each service
+3. **Start infrastructure** (PostgreSQL, Redis, RabbitMQ, MongoDB) — use Docker Compose or cloud services
+4. **Start each service:**
+   - Auth Service: `uvicorn app.main:app --reload --port 8000`
+   - Order Service: `uvicorn app.main:app --reload --port 8001`
+   - Email Service: `npm run build && node dist/index.js` (after setting up Node.js and dependencies)
+5. **Access API docs:**
+   - Auth Service: [http://localhost:8000/docs](http://localhost:8000/docs)
+   - Order Service: [http://localhost:8001/docs](http://localhost:8001/docs)
+
+---
+
+## Deployment Notes
+
+- Each service can be containerized and deployed independently.
+- Use Docker Compose for local orchestration; for production, deploy each service separately (e.g., Render, AWS, GCP).
+- Use managed services for PostgreSQL, MongoDB, Redis, and RabbitMQ in production.
+- Use an API Gateway (e.g., Nginx) for a single entry point if desired.
+
+---
+
+## Key Features & Learnings
+
+- **Microservices:** Each service is independent and can be scaled or deployed separately.
+- **JWT Authentication:** Secure, stateless user authentication across services.
+- **External API Integration:** Product data fetched from fakestoreapi.in.
+- **Caching & Rate Limiting:** Redis used for performance and abuse prevention.
+- **Async Messaging:** RabbitMQ enables decoupled, reliable event-driven communication.
+- **Email Automation:** Nodemailer + Gmail for transactional emails.
+- **Polyglot Persistence:** PostgreSQL for structured data, MongoDB for flexible email logs.
+- **Dockerized:** All services can be run in containers for easy development and deployment.
+
+---
 
 ## Project Structure
+
 ```
-ecommerce-microservices/
+ecommerce/
 ├── auth-service/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── routes/
-│   │   │   ├── auth.py
-│   │   │   └── users.py
-│   │   ├── utils/
-│   │   │   ├── jwt_handler.py
-│   │   │   └── password.py
-│   │   └── database.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env
 ├── order-service/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── routes/
-│   │   │   └── orders.py
-│   │   ├── services/
-│   │   │   ├── product_service.py
-│   │   │   ├── auth_service.py
-│   │   │   └── message_publisher.py
-│   │   └── database.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env
 ├── email-service/
-│   ├── index.js
-│   ├── package.json
-│   ├── Dockerfile
-│   └── templates/
-│       ├── order-confirmation.html
-│       └── status-update.html
 ├── docker-compose.yml
-├── nginx.conf
-├── .env.global
+├── nginx.conf (optional)
 └── README.md
 ```
 
-## Docker Configuration
+---
 
-### docker-compose.yml:
-```yaml
-version: '3.8'
+## Example Order Event Payload (RabbitMQ)
 
-services:
-  # Microservices
-  auth-service:
-    build: ./auth-service
-    ports:
-      - "8001:8000"
-    environment:
-      - DATABASE_URL=postgresql://user:pass@auth-db:5432/auth_db
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=${JWT_SECRET}
-    depends_on:
-      - auth-db
-      - redis
-
-  order-service:
-    build: ./order-service
-    ports:
-      - "8003:8000"
-    environment:
-      - DATABASE_URL=postgresql://user:pass@order-db:5432/order_db
-      - REDIS_URL=redis://redis:6379
-      - RABBITMQ_URL=amqp://rabbitmq:5672/
-      - AUTH_SERVICE_URL=http://auth-service:8000
-    depends_on:
-      - order-db
-      - redis
-      - rabbitmq
-
-  email-service:
-    build: ./email-service
-    environment:
-      - RABBITMQ_URL=amqp://rabbitmq:5672/
-      - EMAIL_USER=${EMAIL_USER}
-      - EMAIL_PASS=${EMAIL_PASS}
-    depends_on:
-      - rabbitmq
-
-  # Databases
-  auth-db:
-    image: postgres:13
-    environment:
-      POSTGRES_DB: auth_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-    volumes:
-      - auth_db_data:/var/lib/postgresql/data
-
-  order-db:
-    image: postgres:13
-    environment:
-      POSTGRES_DB: order_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-    volumes:
-      - order_db_data:/var/lib/postgresql/data
-
-  # Infrastructure
-  redis:
-    image: redis:6-alpine
-    ports:
-      - "6379:6379"
-
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=admin
-      - RABBITMQ_DEFAULT_PASS=admin
-
-  # API Gateway (Optional)
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - auth-service
-      - order-service
-
-volumes:
-  auth_db_data:
-  order_db_data:
-```
-
-## API Flow Examples
-
-### 1. User Registration & Login:
-```
-POST /auth-service/register
+```json
 {
-    "username": "john_doe",
-    "email": "john@example.com",
-    "first_name": "John",
-    "last_name": "Doe",
-    "password": "secure123"
+  "order_number": 12345,
+  "user_email": "user@example.com",
+  "user_name": "John Doe",
+  "total_amount": 100,
+  "items": [{ "product_id": 1, "quantity": 2, "price": 50, "total_amt": 100 }],
+  "payment_method": "cash_on_delivery"
 }
-
-POST /auth-service/login
-{
-    "username": "john_doe",
-    "password": "secure123"
-}
-Response: {"access_token": "jwt_token_here"}
 ```
 
-### 2. Create Order Flow:
-```
-1. Client: POST /order-service/orders
-   Headers: Authorization: Bearer jwt_token
-   Body: {
-       "items": [
-           {"product_id": 1, "quantity": 2},
-           {"product_id": 5, "quantity": 1}
-       ],
-       "shipping_address_id": 1
-   }
+---
 
-2. Order Service → Auth Service: Verify user token
-3. Order Service → External API: Fetch product details
-4. Order Service → Redis: Cache product data
-5. Order Service → Database: Save order
-6. Order Service → RabbitMQ: Publish order.created event
-7. Email Service ← RabbitMQ: Consume event & send email
-```
+## Development Timeline (Sample)
 
-## Development Timeline (7 days):
+- **Day 1:** Project setup, Docker Compose, databases
+- **Day 2:** Auth Service (JWT, user management)
+- **Day 3:** Order Service (order creation, product integration)
+- **Day 4:** Redis caching, rate limiting
+- **Day 5:** RabbitMQ setup, message publishing
+- **Day 6:** Email Service (Node.js, email templates)
+- **Day 7:** Testing, deployment, documentation
 
-**Day 1:** Project setup, Docker compose, databases
-**Day 2:** Auth Service (JWT, user management, addresses)
-**Day 3:** Order Service (order creation, product integration)
-**Day 4:** Redis caching, rate limiting
-**Day 5:** RabbitMQ setup, message publishing
-**Day 6:** Email Service (Node.js, email templates)
-**Day 7:** Testing, deployment, documentation
+---
 
-## Key Learning Outcomes:
-- **Microservices**: Independent services with clear boundaries
-- **JWT Authentication**: Token-based auth across services
-- **External API Integration**: Working with third-party APIs
-- **Caching Strategy**: Redis for performance optimization
-- **Message Queue**: Asynchronous communication with RabbitMQ
-- **Email Automation**: Event-driven notifications
-- **Docker**: Multi-service containerization
-- **Database Per Service**: Microservices data independence
+## Credits
 
-This architecture demonstrates production-ready patterns while being focused and achievable in one week!
+- [fakestoreapi.in](https://fakestoreapi.in) for product data
+- [CloudAMQP](https://www.cloudamqp.com/) for free RabbitMQ
+- [Supabase](https://supabase.com/) for free PostgreSQL Databases
+- [MongoDB Atlas](https://www.mongodb.com/atlas/database) for free MongoDB
+- [Redis Cloud](https://redis.com/try-free/) for free Redis
+
+---
+
+This architecture demonstrates production-ready microservices patterns, event-driven communication, and modern cloud-native best practices.
