@@ -12,6 +12,7 @@ This project is a microservices-based e-commerce order management system, inspir
 - Caching and rate limiting with Redis
 - Polyglot persistence (PostgreSQL, MongoDB)
 - Containerization with Docker
+- Unified API Gateway with Nginx (single entry point)
 
 ## Architecture Diagram
 
@@ -49,10 +50,10 @@ This project is a microservices-based e-commerce order management system, inspir
   - Token verification for other services
   - User profile and address management
 - **Key Endpoints:**
-  - `POST /register` — Register a new user
-  - `POST /login` — User login, returns JWT
-  - `POST /verify-token` — Verify JWT (used by other services)
-  - `GET /user/{user_id}` — Get user details
+  - `POST /api/register` — Register a new user
+  - `POST /api/login` — User login, returns JWT
+  - `POST /api/verify-token` — Verify JWT (used by other services)
+  - `GET /api/user/{user_id}` — Get user details
 - **Database:** PostgreSQL
 
 ### 2. Order Service (FastAPI, PostgreSQL, Redis, RabbitMQ)
@@ -77,9 +78,28 @@ This project is a microservices-based e-commerce order management system, inspir
   - Consumes `order.created` events from RabbitMQ
   - Sends order confirmation emails using Nodemailer (Gmail)
   - Logs sent emails to MongoDB
-- **No public HTTP endpoints required for core functionality**
+- **No public HTTP endpoints for sending emails**
 - **Database:** MongoDB (Atlas or compatible)
 - **Async Messaging:** Consumes from RabbitMQ (`order.created` queue)
+
+---
+
+## API Gateway (Nginx)
+
+- All HTTP requests are routed through a single Nginx API gateway.
+- Nginx rewrites and proxies requests to the correct backend service:
+
+| Gateway URL Prefix | Proxied To Backend URL Prefix |
+| ------------------ | ----------------------------- |
+| `/auth/*`          | `/api/*` on Auth Service      |
+| `/order/*`         | `/api/*` on Order Service     |
+| `/email/*`         | `/` on Email Service          |
+
+**Example:**
+
+- `POST /auth/users` → `POST /api/users` on Auth Service
+- `GET /order/orders/` → `GET /api/orders/` on Order Service
+- `GET /email/` → `/` on Email Service (for health/info)
 
 ---
 
@@ -139,7 +159,10 @@ EMAIL_PASS=your_gmail_app_password
    - Auth Service: `uvicorn app.main:app --reload --port 8000`
    - Order Service: `uvicorn app.main:app --reload --port 8001`
    - Email Service: `npm run build && node dist/index.js` (after setting up Node.js and dependencies)
-5. **Access API docs:**
+5. **Start the Nginx API Gateway:**
+   - Build and run the Nginx Docker container (see `nginx/` directory)
+   - Access all APIs via the gateway (e.g., `http://localhost:8080/auth/...`)
+6. **Access API docs:**
    - Auth Service: [http://localhost:8000/docs](http://localhost:8000/docs)
    - Order Service: [http://localhost:8001/docs](http://localhost:8001/docs)
 
@@ -150,7 +173,8 @@ EMAIL_PASS=your_gmail_app_password
 - Each service can be containerized and deployed independently.
 - Use Docker Compose for local orchestration; for production, deploy each service separately (e.g., Render, AWS, GCP).
 - Use managed services for PostgreSQL, MongoDB, Redis, and RabbitMQ in production.
-- Use an API Gateway (e.g., Nginx) for a single entry point if desired.
+- Use an API Gateway (e.g., Nginx) for a single entry point for all HTTP APIs.
+- **Email Service does not require public HTTP endpoints for normal operation.**
 
 ---
 
@@ -164,6 +188,7 @@ EMAIL_PASS=your_gmail_app_password
 - **Email Automation:** Nodemailer + Gmail for transactional emails.
 - **Polyglot Persistence:** PostgreSQL for structured data, MongoDB for flexible email logs.
 - **Dockerized:** All services can be run in containers for easy development and deployment.
+- **API Gateway:** Nginx provides a unified entry point and route management.
 
 ---
 
@@ -174,9 +199,9 @@ ecommerce/
 ├── auth-service/
 ├── order-service/
 ├── email-service/
+├── ngnix/ (API Gateway config)
 ├── docker-compose.yml
-├── nginx.conf (optional)
-└── README.md
+├── README.md
 ```
 
 ---
@@ -193,6 +218,14 @@ ecommerce/
   "payment_method": "cash_on_delivery"
 }
 ```
+
+---
+
+## Testing the Email Service
+
+- **Normal flow:** Place an order via the Order Service (through the API Gateway). This will publish an `order.created` event to RabbitMQ, which the Email Service will consume and send the confirmation email.
+- **Direct HTTP requests to the Email Service are not required or supported for sending emails.**
+- **To test in isolation:** Manually publish a message to the `order.created` queue in RabbitMQ with the correct payload.
 
 ---
 
@@ -219,4 +252,3 @@ ecommerce/
 ---
 
 This architecture demonstrates production-ready microservices patterns, event-driven communication, and modern cloud-native best practices.
-dsf
