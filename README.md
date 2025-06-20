@@ -104,7 +104,7 @@ Each service uses its own `.env` file. Example variables:
 ### Auth Service
 
 ```
-DATABASE_URL=postgresql://user:pass@host:5432/auth_db
+DATABASE_URL=""
 JWT_SECRET=your_jwt_secret
 REDIS_URL=redis://host:6379
 ```
@@ -112,18 +112,18 @@ REDIS_URL=redis://host:6379
 ### Order Service
 
 ```
-DATABASE_URL=postgresql://user:pass@host:5432/order_db
+DATABASE_URL=""
 PRODUCTS_API=https://fakestoreapi.in/api/products
 AUTH_SERVICE=http://auth-service:8001
-RABBITMQ_URL=amqps://user:pass@host.rmq.cloudamqp.com/vhost
+RABBITMQ_URL=""
 REDIS_URL=redis://host:6379
 ```
 
 ### Email Service
 
 ```
-RABBITMQ_URL=amqps://user:pass@host.rmq.cloudamqp.com/vhost
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/emaildb
+RABBITMQ_URL=""
+MONGODB_URI=""
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_gmail_app_password
 ```
